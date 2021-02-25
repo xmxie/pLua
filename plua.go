@@ -75,6 +75,7 @@ func parse(filename string, skip string) (*FileData, bool) {
 		fmt.Printf("data error too small\n")
 		return nil, false
 	}
+	
 
 	namemaplen := int(binary.LittleEndian.Uint32(data[len(data)-4 : len(data)]))
 	if namemaplen < 0 {
@@ -87,6 +88,7 @@ func parse(filename string, skip string) (*FileData, bool) {
 
 	namenum := 0
 	end := len(data) - 4
+	fmt.Printf("end init: %v\n", end)
 	for i := 0; i < len(data) && namenum < namemaplen; i++ {
 		start := end - 4
 		if start < 0 || end < 0 {
@@ -104,9 +106,14 @@ func parse(filename string, skip string) (*FileData, bool) {
 		namelen := int(binary.LittleEndian.Uint32(data[start:end]))
 		end -= 4
 
+		fmt.Printf("Little Endian name len: %v\n", namelen)
 		if namelen <= 0 || namelen > MAX_FUNC_NAME_SIZE {
-			fmt.Printf("name len error %v\n", namelen)
-			return nil, false
+			namelen = int(binary.BigEndian.Uint32(data[start:end+4]))
+			fmt.Printf("Bing Endian name len: %v\n", namelen)
+			if namelen <= 0 || namelen > MAX_FUNC_NAME_SIZE{
+				fmt.Printf("name len error %v\n", namelen)
+				return nil, false
+			}
 		}
 
 		start = end - namelen

@@ -16,9 +16,10 @@
 #include <stdarg.h>
 #include <assert.h>
 #include <math.h>
-#include <sys/time.h>
+//#include <sys/time.h>
+#include <time.h>
 #include <signal.h>
-#include <unistd.h>
+//#include <unistd.h>
 #include <errno.h>
 #include <unordered_map>
 #include <fcntl.h>
@@ -31,10 +32,21 @@
 #include <graphviz/gvc.h>
 #endif
 
+// 添加windows适配
+#include <Windows.h>
+#include <io.h>
+#pragma comment(lib,"Winmm.lib")	//For timeSetEvent
+
+typedef long int ssize_t;
+int timer_id = -1;
+
 extern "C" {
 #include "lua.h"
 #include "lualib.h"
 #include "lauxlib.h"
+//#include "lua-5.1.5/src/lua.h"
+//#include "lua-5.1.5/src/lualib.h"
+//#include "lua-5.1.5/src/lauxlib.h"
 }
 
 int open_debug = 0;
@@ -60,13 +72,14 @@ void llog(const char *header, const char *file, const char *func, int pos, const
     clock1 = time(0);
     tptr = localtime(&clock1);
 
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
+    //临时屏蔽log，之后再做window适配
+    //struct timeval tv;
+    //gettimeofday(&tv, NULL);
 
-    fprintf(pLog, "===========================[%d.%d.%d, %d.%d.%d %llu]%s:%d,%s:===========================\n%s",
-            tptr->tm_year + 1990, tptr->tm_mon + 1,
-            tptr->tm_mday, tptr->tm_hour, tptr->tm_min,
-            tptr->tm_sec, (long long) ((tv.tv_sec) * 1000 + (tv.tv_usec) / 1000), file, pos, func, header);
+    //fprintf(pLog, "===========================[%d.%d.%d, %d.%d.%d %llu]%s:%d,%s:===========================\n%s",
+    //        tptr->tm_year + 1990, tptr->tm_mon + 1,
+    //        tptr->tm_mday, tptr->tm_hour, tptr->tm_min,
+    //        tptr->tm_sec, (long long) ((tv.tv_sec) * 1000 + (tv.tv_usec) / 1000), file, pos, func, header);
 
     va_start(ap, fmt);
     vfprintf(pLog, fmt, ap);
@@ -281,15 +294,22 @@ extern "C" int lrealstop(lua_State *L) {
 
     grunning = 0;
 
-    struct itimerval timer;
-    timer.it_interval.tv_sec = 0;
-    timer.it_interval.tv_usec = 0;
-    timer.it_value = timer.it_interval;
-    int ret = setitimer(ITIMER_REAL, &timer, NULL);
-    if (ret != 0) {
-        LERR("setitimer fail %d", ret);
-        return ret;
+    if (timer_id < 0) {
+        LLOG("timer_id wrong");
+        return -1;
     }
+    timeKillEvent(timer_id);
+
+    //struct itimerval timer;
+    //timer.it_interval.tv_sec = 0;
+    //timer.it_interval.tv_usec = 0;
+    //timer.it_value = timer.it_interval;
+    //int ret = setitimer(ITIMER_REAL, &timer, NULL);
+    //if (ret != 0) {
+    //    LERR("setitimer fail %d", ret);
+    //    return ret;
+    //}
+
 
     flush();
     return 0;
@@ -402,7 +422,13 @@ static void SignalHandlerHook(lua_State *L, lua_Debug *par) {
 
 }
 
-static void SignalHandler(int sig, siginfo_t *sinfo, void *ucontext) {
+//定时器的回调函数
+void WINAPI TimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
+{
+    lua_sethook(gL, SignalHandlerHook, LUA_MASKCOUNT, 1);
+}
+
+static void SignalHandler(int signum) {
     lua_sethook(gL, SignalHandlerHook, LUA_MASKCOUNT, 1);
 }
 
@@ -429,25 +455,36 @@ extern "C" int lrealstart(lua_State *L, int second, const char *file) {
 
     LLOG("lstart %u %s", gsamplecount, file);
 
-    struct sigaction sa;
-    sa.sa_sigaction = SignalHandler;
-    sa.sa_flags = SA_RESTART | SA_SIGINFO;
-    sigemptyset(&sa.sa_mask);
-
-    if (sigaction(SIGALRM, &sa, NULL) == -1) {
-        LERR("sigaction(SIGALRM) failed");
+    // Windows下使用timeSetEvent实现定时器
+    int timerID = timeSetEvent(iter * 1000, 1, (LPTIMECALLBACK)TimerCallback, NULL, TIME_PERIODIC);
+    if (timerID == NULL)
+    {
+        LLOG("timeSetEvent faild");
         return -1;
     }
+    timer_id = timerID;
 
-    struct itimerval timer;
-    timer.it_interval.tv_sec = 0;
-    timer.it_interval.tv_usec = iter * 1000;
-    timer.it_value = timer.it_interval;
-    int ret = setitimer(ITIMER_REAL, &timer, NULL);
-    if (ret != 0) {
-        LERR("setitimer fail %d", ret);
-        return -1;
-    }
+
+    // 设置一个定时器，回调为SignalHandler
+    //struct sigaction sa;
+    //sa.sa_sigaction = SignalHandler;
+    //sa.sa_flags = SA_RESTART | SA_SIGINFO;
+    //sigemptyset(&sa.sa_mask);
+
+    //if (sigaction(SIGALRM, &sa, NULL) == -1) {
+    //    LERR("sigaction(SIGALRM) failed");
+    //    return -1;
+    //}
+
+    //struct itimerval timer;
+    //timer.it_interval.tv_sec = 0;
+    //timer.it_interval.tv_usec = iter * 1000;
+    //timer.it_value = timer.it_interval;
+    //int ret = setitimer(ITIMER_REAL, &timer, NULL);
+    //if (ret != 0) {
+    //    LERR("setitimer fail %d", ret);
+    //    return -1;
+    //}
 
     memset(&gProfileData, 0, sizeof(gProfileData));
     memset(&gCallStackSaved, 0, sizeof(gCallStackSaved));

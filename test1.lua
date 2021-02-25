@@ -57,10 +57,16 @@ function test25(n)
 
 end
 
-local p = require "libplua"
 
+local p = require "libplua"
 p.start(0, "call.pro")
 
 test()
 
 p.stop()
+
+
+-- local start = package.loadlib("pluaDll.dll", "start")
+-- local stop  = package.loadlib("pluaDll.dll", "stop")
+
+-- print(start)
